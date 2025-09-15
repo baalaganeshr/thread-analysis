@@ -1,0 +1,108 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    profiles: ["dev"]
+    env_file:
+      - ./docker.env
+    environment:
+      # DB + cache (override via docker.env if needed)
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: cyberguard
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      # Optional Gemini
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      - mongo
+      - redis
+      - qdrant
+    volumes:
+      - ./backend:/app
+    command: ["uvicorn","main:app","--host","0.0.0.0","--port","8000","--reload"]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    profiles: ["dev"]
+    command: ["sh","-lc","[ -d node_modules ] || npm ci --no-audit --no-fund; npm run dev"]
+    environment:
+      # Ensure browser calls host-mapped backend, not service DNS
+      NEXT_PUBLIC_BACKEND_HTTP_URL: http://localhost:${BACKEND_PORT:-8000}
+      NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:${BACKEND_PORT:-8000}/ws
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend
+
+  backend-prod:
+    build:
+      context: ./backend
+    env_file:
+      - ./docker.env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: cyberguard
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      - mongo
+      - redis
+      - qdrant
+    profiles: ["prod"]
+
+  frontend-prod:
+    build:
+      context: ./frontend
+      target: runner
+    environment:
+      NEXT_PUBLIC_BACKEND_HTTP_URL: http://localhost:${BACKEND_PORT:-8000}
+      NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:${BACKEND_PORT:-8000}/ws
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend-prod
+    profiles: ["prod"]
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  mongo_data:
+  qdrant_data:
+
